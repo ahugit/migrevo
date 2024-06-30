@@ -1,0 +1,28 @@
+#!/bin/bash
+## My first script
+
+echo "Cat to combo and then compile to create executable called combo"
+
+DIR1=/home/ec2-user/work
+DIR2=/vol/migit
+
+#cp $DIR1/*     $DIR2/.
+#cp $DIR1/agres.txt     $DIR2/.
+#cp $DIR1/cohabinit.txt $DIR2/.
+#cp $DIR1/cohabPSID.txt $DIR2/.
+#cp familymigPSID.txt $DIR2/.
+#cp bestpar121416.txt $DIR2/.
+
+
+cd $DIR1
+
+cat mig_combo.f90 pnmead.f90 mig_params.f90 mig_share.f90 mig_yaz.f90 mig_sol.f90 mig_mom.f90 mig_objf.f90 mig_main.f90 > $DIR1/program.f90
+
+
+
+#/usr/lib64/mpich/bin/mpif90 $DIR1/program.f90 -ffree-line-length-none -fcheck=all -O0 -fbacktrace -o $DIR1/mig.x
+#/usr/lib64/mpich/bin/mpif90 $DIR1/program.f90 -ffree-line-length-none -fcheck=all -o $DIR1/mig.x
+#/usr/lib64/mpich/bin/mpif90 $DIR1/program.f90 -ffree-line-length-none -O0 -fbounds-check -fwrapv -fno-strict-overflow -o $DIR1/mig.x
+/usr/lib64/mpich/bin/mpif90 $DIR1/program.f90 -ffree-line-length-none -fwrapv -fno-strict-overflow -o $DIR1/mig.x
+
+

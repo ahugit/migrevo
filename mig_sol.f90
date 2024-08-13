@@ -66,15 +66,15 @@ end do
 			vm_premarmkt  = pen ; vf_premarmkt = pen	
 			time(1)=secnds(0.0)
 			if (ia==mxa) then 
-				vm0_s = utils(1,:,:,trueindex) + wsnet(1,:,:,ia,trueindex)		! v0: value function without movecost 
-				vf0_s = utils(2,:,:,trueindex) + wsnet(2,:,:,ia,trueindex)		! v0: value function without movecost
-				vm0_c(:,:,ia,index) = utilc(1,:,:,trueindex)	! v0: value function without movecost, umar, consumption
-				vf0_c(:,:,ia,index) = utilc(2,:,:,trueindex)	! v0: value function without movecost, umar, consumption
+				vm0_s               = utils(1,:,:,ia,trueindex) !+ wsnet(1,:,:,ia,trueindex)		! v0: value function without movecost 
+				vf0_s               = utils(2,:,:,ia,trueindex) !+ wsnet(2,:,:,ia,trueindex)		! v0: value function without movecost
+				vm0_c(:,:,:,ia,index) = utilc(1,:,:,ia,trueindex)	! v0: value function without movecost, umar, consumption
+				vf0_c(:,:,:,ia,index) = utilc(2,:,:,ia,trueindex)	! v0: value function without movecost, umar, consumption
             else 
-				vm0_s = utils(1,:,:,trueindex) + wsnet(1,:,:,ia,trueindex)		+ delta * emaxm_s(:,:,ia+1)	! v0: value function without movecost 
-				vf0_s = utils(2,:,:,trueindex) + wsnet(2,:,:,ia,trueindex)		+ delta * emaxf_s(:,:,ia+1)	! v0: value function without movecost 
-				vm0_c(:,:,ia,index) = utilc(1,:,:,trueindex)	+ delta * emaxm_c(:,:,ia+1)	! v0: value function without movecost, umar, consumption
-				vf0_c(:,:,ia,index) = utilc(2,:,:,trueindex)	+ delta * emaxf_c(:,:,ia+1)	! v0: value function without movecost, umar, consumption
+				vm0_s               = utils(1,:,:,ia,trueindex) + delta * emaxm_s(:,:,ia+1)  !+ wsnet(1,:,:,ia,trueindex)			! v0: value function without movecost 
+				vf0_s               = utils(2,:,:,ia,trueindex) + delta * emaxf_s(:,:,ia+1)  !+ wsnet(2,:,:,ia,trueindex)			! v0: value function without movecost 
+				vm0_c(:,:,:,ia,index) = utilc(1,:,:,ia,trueindex)	+ delta * emaxm_c(:,:,:,ia+1)	! v0: value function without movecost, umar, consumption
+				vf0_c(:,:,:,ia,index) = utilc(2,:,:,ia,trueindex)	+ delta * emaxf_c(:,:,:,ia+1)	! v0: value function without movecost, umar, consumption
 			end if 		
             
 			
@@ -285,6 +285,331 @@ end do
 	end if 
 	insol=.false.
 	end subroutine solve
+
+
+
+
+
+    !ag090122 agsept2022 Changed getdec_c to getdec in order to include mar market decisinos in getdec as well
+    !                     so that everything is all in one same place and if decisino protocol changes are made they have to be made to only one place
+	!                     OLDER VERSIONS OF GETDEC_C CAN BE FOUND IN MIGSOLGETDEC.F90 FILE
+    One of the main goals in this paper is to show that gender wage differences do not exist in a vacuum. In other words, what they imply about what
+     happens within households is an important aspect of the problem. As I highlight in the introduction of the first draft, the welfare implications ofgende rwage differences 
+
+    subroutine getdecR(dd,vmax,vsing,transfers) 
+        integer(i4b), intent(inout) :: dd(:)
+        real(dp), intent(out) :: vmax(2),transfers(2) 
+        real(dp), intent(in) :: vsing(2) 
+        real(dp) :: vecj(5,nc),vec(5),surplusj(nc),surplus,vdif(2),mcost(2),asum,yazvec(5),vmaxcheck(2)
+        integer(i4b) :: ia,index,q,x,z,q0,g,jmax,qmax,relmax,i,i0,n,trueindex,j,de(1),ed(2),locch,loc0,callfrom
+        logical :: haveenough(nc),haveenoughtomakeindiff,haveenoughtomakeindiff_alt,intsol(3),pc(2),pc_alt(2),haveenoughforNB(nc),haveenoughNB
+        integer(i4b) :: trueco,truetyp,truehome,iepjoint,iephub,iepwfe,indeces(2),tempmax
+        callfrom=dd(7)
+        ia=dd(1) 
+        trueindex=dd(2) 
+        if (groups) then 
+            index=1
+        else 
+            index=trueindex
+        end if
+        call index2cotyphome(trueindex,trueco,truetyp,truehome)
+        q=dd(3) 
+        x=dd(4) ; ed(:)=xx2e(:,x)   
+        z=dd(5)
+        q0=dd(6)  
+        vec=pen				! initialize
+        jmax=-1				! initialize
+        qmax=-1				! initialize
+        relmax=-1           ! initialize
+        vmax=pen			! initialize
+        transfers=pen 
+        if (Callfrom==40.or.callfrom==80) then !calling from sol/couples/getdec (40) OR simul/couples/getdec (80) 
+
+            vec=pen
+            loc0=qq2l(1,q0)     !ahumarch2022 ahu032022
+            do locch=1,nl ; locdif(locch)=one( locch /= loc0 ) ; end do !locations array
+            iepjoint=dd(11) !note that dd(5) used to be z and iepsmove used to be dd(11) before
+            indeces=lin2ndim( (/ nepsmove , nepsmove /) , iepjoint )
+            iephub=indeces(1) ; iepwfe=indeces(2)  
+            array_m(:,loc0) = utilmar(MALES,x,z,trueindex,ia)   + locdif(:) * (movecost(xx2x(1,x),qq2q(1,q0),trueindex,MALES)    + moveshockmar(iephub,1)    + distance(:,loc0)*cstadjacent ) 
+            array_f(:,loc0) = utilmar(FEMALES,x,z,trueindex,ia) + locdif(:) * (movecost(xx2x(2,x),qq2q(2,q0),trueindex,FEMALES)  + moveshockmar(iepwfe,2)    + distance(:,loc0)*cstadjacent )
+            
+            i = qq2q(1,q) ; n=xx2x(1,x) ; i0 = qq2q(1,q0) 
+            vec(1) = vm_postdiv(iephub,n,i,i0,ia,index) + diveduc(x2e(n)) !+ divpenalty * one( q2l(qchoicesingle) /= loc0 )
+            i = qq2q(2,q) ; n=xx2x(2,x) ; i0 = qq2q(2,q0) 	
+            vec(2) = vf_postdiv(iepwfe,n,i,i0,ia,index) + diveduc(x2e(n)) !+ divpenalty * one( q2l(qchoicesingle) /= loc0 )
+            
+            vecj=pen ; surplusj=pen ; haveenough=.FALSE. ; yazvec=pen 
+            do ll=1,nl
+                muii=mui0
+                GO TO 358
+
+                
+                
+                
+                
+                
+                
+                
+                
+                cc=0
+                358 choice1: do j=1,nc	
+                    i = ch(j,q,q0)	!alternative q
+                    if (i>0 ) then		
+                        locch=qq2l(1,i)     !ahumarch2122 ahu032122
+                        if (ll==locch) then
+                            cc=cc+1  
+                        if (callfrom==40) then !calling from sol
+                            vmchoice(cc) = vm0ctemp(i,muii,x)       + array_m(locch,loc0)
+                            vfchoice(cc) = vf0ctemp(i,muii,x)       + array_f(locch,loc0)
+                        else if (callfrom==80) then !calling from simulation
+                            vmchoice(cc) = vm0_c(x,i,muii,ia,index) + array_m(locch,loc0)
+                            vfchoice(cc) = vf0_c(x,i,muii,ia,index) + array_f(locch,loc0)
+                        end if 
+                    end if      
+                end do choice1
+
+
+                pmax(1)=MAXLOC(muvec(muii)*vmchoice(:)+(1-muvec(muii))*vfchoice(:))
+                qmax(ll)=pmax(1)
+                vmax(1,ll)=vmchoice(pmax(1))
+                vmax(2,ll)=vfchoice(pmax(1))
+                pc(1:2)	= ( vmax(1:2,ll) - vec(1:2) + eps >= 0.0_dp )
+            
+                if (.not.pc(1) .or. .not.pc(2) ) then 
+                muii=mui0
+                DO WHILE ((vmax(1,ll)<vec(1)) .AND. (muii<=Nmu))
+                    muii=muii+1
+                    cc=0
+                    choice2: do j=1,nc	
+                    i = ch(j,q,q0)	!alternative q
+                    if (i>0 ) then		
+                        locch=qq2l(1,i)     !ahumarch2122 ahu032122
+                        if (ll==locch) then
+                            cc=cc+1  
+                        if (callfrom==40) then !calling from sol
+                            vmchoice(cc) = vm0ctemp(i,muii,x)       + array_m(locch,loc0)
+                            vfchoice(cc) = vf0ctemp(i,muii,x)       + array_f(locch,loc0)
+                        else if (callfrom==80) then !calling from simulation
+                            vmchoice(cc) = vm0_c(x,i,muii,ia,index) + array_m(locch,loc0)
+                            vfchoice(cc) = vf0_c(x,i,muii,ia,index) + array_f(locch,loc0)
+                        end if 
+                    end if      
+                    end do choice2
+                    pmax(1)=MAXLOC(muvec(muii)*vmchoice(:)+(1-muvec(muii))*vfchoice(:))
+                    qmax(ll)=pmax(1)
+                    vmax(1,ll)=vmchoice(pmax(1))
+                    vmax(2,ll)=vfchoice(pmax(1))
+                    pc(1:2)	= ( vmax(1:2,ll) - vec(1:2) + eps >= 0.0_dp )
+                END DO !while vmmaxloc is still less than outside value
+                end do !muivec
+
+
+				if locch=1,nl
+                    call sort1(vmuim)
+                    k=locate(vmuim(:,locch),vec(1)) 
+                    if (iam==0) write(64,'("first try ",i6,3f14.4,i6)') j,q1val(1),q1val(nj2),(lb+j*0.1_sp)*real(qval),k
+					j=0
+					if (k==0) then 
+						do while (ub-j*0.1_sp>=1.05_sp)
+							k=locate(q1val,(ub-j*0.1_sp)*real(qval)) 
+							if (iam==0) write(64,'("second try ",i6,3f14.4,i6)') j,q1val(1),q1val(nj2),(ub-j*0.1_sp)*real(qval),k
+							if (k>0.and.k<nj2) exit 
+							j=j+1
+						end do 
+					end if 					
+					if (iam==0) write(64,'("and now it is done ",i6)') k
+					if (k>0) then ; stepmin(i)=step(k) ; else ; stepmin(i)=-99.0 ; end if 
+					if (iam==0) then 
+						!write(64,*) "here is the best bumps for the initial simplex"
+						write(64,*)
+						write(64,'("lb,ub,q1min,q1max",4x,4f14.4)') lb*qval,ub*qval,q1val(1),q1val(nj2)
+						write(64,*)
+						if (k>0) then 
+							write(64,'(2i6,4f14.4,4(5x,f14.4) )') i,k,qval,q1val(k),pars(i),pars1(i),realpars(i),realpars1(i),step(k),abs(q1val(k)-qval)
+						end if 
+						write(64,*) 
+					end if 												
+
+
+                end do !mui 
+            end if !participation constraint check                   
+            
+            
+            
+            
+            if ( .not.pc(1)   ) THEN
+                ! only male's PC binds, increase mu until doesn't
+                DO WHILE ((vmax(1,muii)<vec(1)) .AND. (muii<=Nmu))
+                    muii=muii+1
+                ENDDO
+                IF ((muii>Nmu) .OR. (vmax(2,muii)<vec(2))  ) THEN
+                    ! can't find mu that satisfies both PC -> separate
+                    Vcm(wagexj,thetai,nkidj,prevkidsi,mui)=vmout+cohabpenalty(myco)+kidpenalty*nkidj
+                    Vcf(wagexj,thetai,nkidj,prevkidsi,mui)=vfout+cohabpenalty(myco)+kidpenalty*nkidj
+                    IF (age<=maxagesim) THEN
+                        muc(mui,thetai,prevkidsi,nkidj,wagexj,age)=0
+                    ENDIF
+                    if (indwriteoutput.eq.1) then
+                        WRITE(2,'(16I4)') 3,mui,thetai,nkidm,nkidf,nkidj,com,wagem,typm,dlawm,cof,wagef,typf,dlawf,age,0
+                    end if 
+
+
+
+            IF (.NOT.UPFRONTTRANSFERS) THEN
+                de=maxloc(surplusj,MASK=(haveenough.AND.haveenoughforNB)) 
+            ELSE 
+                de=maxloc(surplusj,MASK=(surplusj>=0.0_dp)) 
+            END IF 
+            if (de(1)>0) then 
+                jmax=de(1) ; qmax=ch(jmax,q,q0) ; relmax=1
+                surplus=surplusj(jmax)                
+                vdif(1:2)=vecj(1:2,jmax)    
+                vec(3:5)=vecj(3:5,jmax)
+                transfers(1) = alf * surplus -  vdif(1)                                                           
+                transfers(2) = (1.0_dp-alf) * (vec(5) + vdif(1) ) - alf*vdif(2)  
+                if (    abs(transfers(1)+transfers(2) - vec(5) ) >  0.00001_dp  ) then 
+                    print*, "Stop it right now",transfers(1:2),vec(5)
+                end if 
+                vmaxcheck(1:2)=vec(3:4)+transfers(1:2)
+                vmax(1:2)=vec(1:2)+alf*surplus
+                if (    abs(vmaxcheck(1)-vmax(1))>0.00001_dp   .or.  abs(vmaxcheck(2)-vmax(2))>0.00001_dp ) then 
+                    print*, "Stop it right now"
+                end if 
+                !if (skriv) then 
+                    !myefficiency(:)%ve1=vecj(1,:)    
+                    !myefficiency(:)%ve2=vecj(2,:)    
+                    !myefficiency(:)%ve3=vecj(3,:)    
+                    !myefficiency(:)%ve4=vecj(4,:)    
+                    !myefficiency(:)%ve5=vecj(5,:)    
+                    !myefficiency(:)%sur=surplusj(:) 
+                    !myefficiency(:)%haveenough=haveenough(:)
+                    !myefficiency(:)%haveenoughforNB=haveenoughforNB(:)
+                    de=maxloc(surplusj,MASK=(haveenough.AND.haveenoughforNB))
+                    tempmax=de(1)
+                    if (de(1)>0) then 
+                        myefficiency%maxA=ch(tempmax,q,q0) 
+                    else 
+                        myefficiency%maxA=0
+                    end if
+                    de=maxloc(surplusj,MASK=(surplusj>=0.0_dp)) 
+                    tempmax=de(1)
+                    if (de(1)>0) then 
+                        myefficiency%maxB=ch(tempmax,q,q0) 
+                    else 
+                        myefficiency%maxB=0
+                    end if
+                    myefficiency%tra1=transfers(1) 
+                    myefficiency%tra2=transfers(2) 
+                !end if
+                !SAVETIME IF (.NOT.UPFRONTTRANSFERS) THEN
+                !SAVETIME     if (minval(transfers)<-0.00001 .or. abs(vmaxcheck(1)-vmax(1))>0.00001_dp .or.  abs(vmaxcheck(2)-vmax(2))>0.00001_dp ) then 
+                !SAVETIME         print*, "Seriously though", transfers,vmaxcheck,vmax 
+                !SAVETIME         stop
+                !SAVETIME     end if 
+                !SAVETIME     if ( vec(5) + eps < abs(vdif(1)-vdif(2)) )  then 
+                !SAVETIME         print*, "why here should not be here like at all ", callfrom,vec(5),vdif(1)-vdif(2)
+                !SAVETIME         stop
+                !SAVETIME     end if
+                !SAVETIME END IF !NO UPFRONTTRANSFERS.
+                !SAVETIME if (yaz) then ; write(200,*)  ; write(200,*) ; write(400,*) ; write(400,*) ; end if
+                !SAVETIME if (yaz.and.callfrom==40) write(200,*) "in sol/getdec couples de(1)>0: jmax,qmax,relmax,surplusJ(jmax),vecj(1:5,jmax) NOW GO TO 2013"
+                !SAVETIME if (yaz.and.callfrom==40) write(200,'(I4,I8,I4,6F9.2)') jmax,qmax,relmax,surplusj(jmax),vecj(1:5,jmax)
+                !SAVETIME if (yaz.and.callfrom==80) write(400,*) "in sim/getdec couples de(1)>0: jmax,qmax,relmax,surplusJ(jmax),vecj(1:5,jmax) NOW GO TO 2013"
+                !SAVETIME if (yaz.and.callfrom==80) write(400,'(I4,I8,I4,6F9.2)') jmax,qmax,relmax,surplusj(jmax),vecj(1:5,jmax)
+                GO TO 2017
+            else 
+                jmax=-1 ; qmax=-1  ; relmax=0 ; vmax(1:2)=vec(1:2) ; transfers=pen
+                !SAVETIME if (yaz) then ; write(200,*)  ; write(200,*) ; write(400,*) ; write(400,*) ; end if
+                !SAVETIME if (yaz.and.callfrom==40) write(200,*) "in sol/getdec couples de(1)<=0: jmax,qmax,relmax,de(1) NOW GO TO 2017"
+                !SAVETIME if (yaz.and.callfrom==40) write(200,*) jmax,qmax,relmax,de(1)
+                !SAVETIME if (yaz.and.callfrom==80) write(400,*) "in sim/getdec couples de(1)<=0: jmax,qmax,relmax,de(1) NOW GO TO 2017"
+                !SAVETIME if (yaz.and.callfrom==80) write(400,*) jmax,qmax,relmax,de(1)
+                GO TO 2017
+            end if 
+        end if 
+
+        if (callfrom==50) then !calling from sol/marmkt (this getdec instance is only called in sol (not sim because I save all decisions to dec array)
+            if (dd(11).ne.-1) then ; print*, "iepsingle is not -1 in call to getdec and callfrom is from sol/marmkt!!" ; stop ; end if 
+            vec(1:2)=vsing(1:2) !ag090822 agsept2022 vsing(1:2) 
+            vec(3) = vm0ctemp(q,x) + utilmar(MALES,x,z,trueindex,ia) 
+            vec(4) = vf0ctemp(q,x) + utilmar(FEMALES,x,z,trueindex,ia) 
+            vec(5) = wmctemp(q,x,ia,trueindex) +  wfctemp(q,x,ia,trueindex) + nonlabinc(ed(1)) + nonlabinc(ed(2))    + ubenefit_c(q)                                                
+            vdif(1)=vec(3)-vec(1)   !ahumarch1522 ahu031522 adding cornersol
+            vdif(2)=vec(4)-vec(2)   !ahumarch1522 ahu031522 adding cornersol
+            !ahumarch2122 ahu032122 replacing this with vdif for saving time surplus = vec(5) + vec(3) - vec(1) + vec(4) - vec(2)  
+            surplus = vec(5) + sum(vdif(1:2))  !ahumarch2122 ahu032122 replacing with vdif for saving time
+            pc(1:2)	= ( vdif + eps >= 0.0_dp )	!pc(1:2)    = ( vec(3:4) - vec(1:2) >= 0.0_dp )						        
+            !ahu032122 ahumarch2122 commenting out to save time pc_alt(1:2)=( vdif >= 0.0_dp )	
+            asum = sum(  one(.not. pc)  *   abs( vdif )   ) 
+            haveenoughtomakeindiff=(  vec(5) + eps - asum  >= 0.0_dp  ) ; haveenoughNB= (vec(5) +eps >= abs(vdif(1)-vdif(2)) )
+            IF (.NOT.UPFRONTTRANSFERS) THEN
+                de(1)=one( surplus+eps > 0.0_dp .and. haveenoughtomakeindiff .and. haveenoughNB)             
+            ELSE 
+                de(1)=one( surplus+eps > 0.0_dp )             
+            END IF 
+            !SAVETIME if (yaz) then 
+                !callfrom=50 is sol/marmkt/getdec and before calling getdec, dd(9) is just set to q i.e. equal to dd(3) and dd dd(8)=-1 ; dd(9)=-1 !to tell yaz_getdec which alternative is being evaluated (where j is the choice and i is the corresponding q)
+                !but when calling from singles mar market there is no j or i so set equal to -1 
+                !SAVETIME call yaz_getdec(dd,vec(1:5),surplus,pc(1:2),asum,haveenoughtomakeindiff) !called from sol/getdec/marmkt 
+            !SAVETIME end if 
+            if (de(1)>0) then 
+                jmax=-1 ; qmax=-1 ; relmax=1
+                transfers(1) = alf * surplus -  vdif(1)                                                           
+                transfers(2) = (1.0_dp-alf) * (vec(5) + vdif(1) ) - alf*vdif(2)  
+                vmaxcheck(1:2)=vec(3:4)+transfers(1:2)
+                vmax(1:2)=vec(1:2)+alf*surplus
+                if (    abs(vmaxcheck(1)-vmax(1))>0.00001_dp   .or.  abs(vmaxcheck(2)-vmax(2))>0.00001_dp ) then 
+                    print*, "Stop it right now"
+                end if 
+                if (    abs(transfers(1)+transfers(2) - vec(5) ) >  0.00001_dp  ) then 
+                    print*, "Stop it right now this is sol mar market ",transfers(1:2),vec(5)
+                end if 
+                !SAVETIME IF (.NOT.UPFRONTTRANSFERS) THEN
+                !SAVETIME     if (minval(transfers)<-0.00001 .or. abs(vmaxcheck(1)-vmax(1))>0.00001_dp .or.  abs(vmaxcheck(2)-vmax(2))>0.00001_dp ) then 
+                !SAVETIME         print*, "Seriously though", transfers,vmaxcheck,vmax 
+                !SAVETIME         stop
+                !SAVETIME     end if 
+                !SAVETIME     if ( vec(5) + eps < abs(vdif(1)-vdif(2)) )  then 
+                !SAVETIME         print*, "why here should not be here like at all ", callfrom
+                !SAVETIME         stop
+                !SAVETIME     end if
+                !SAVETIME END IF !UPFRONT transfers   
+                !SAVETIME if (yaz) write(200,*) "in sol/getdec marmkt de(1)>0: jmax,qmax,relmax,surplus,vec(1:5) NOW GO TO 2013"
+                !SAVETIME if (yaz) write(200,'(I4,I8,I4,6F9.2)') jmax,qmax,relmax,surplus,vec(1:5) 
+                GO TO 2017 !have to calculate vmax and transfers before going to 2017 
+            else 
+                jmax=-1 ; qmax=-1  ; relmax=0 ; vmax(1:2)=vec(1:2) ; transfers=pen 
+                !SAVETIME if (yaz) write(200,*) "in sol/getdec marmkt de(1)<=0: jmax,qmax,relmax,surplus,vec(1:5) NOW GO TO 2017"
+                !SAVETIME if (yaz) write(200,'(I4,I8,I4,6F9.2)') jmax,qmax,relmax,surplus,vec(1:5)                 
+                GO TO 2017 ! go directly to 2017
+            end if 
+        end if 
+
+        !CORNER SOLUTIONS NOW OBSOLETE
+        !else if ( vec(5) <= vdif(1)-vdif(2) + eps  )  then 
+        !    transfers(1)=0.0_dp                         !ahumarch1522 adding cornersol
+        !    transfers(2)=vec(5)                         !ahumarch1522 adding cornersol
+        !    vmax(1:2)=vec(3:4)+inc_coef*transfers(1:2)
+        !    GO TO 2017
+        !else if ( vec(5) <= vdif(2)-vdif(1) + eps  )   then 
+        !    transfers(1)=vec(5)                         !ahumarch1522 adding cornersol
+        !    transfers(2)=0.0_dp                         !ahumarch1522 adding cornersol
+        !    vmax(1:2)=vec(3:4)+inc_coef*transfers(1:2)
+        !    GO TO 2017
+        !!!!!!!!else if (relmax==0) then 
+        !!!!!!!    vmax(1:2)=vec(1:2)
+        !!!!!!!!    GO TO 2017
+        2017 dd(8)=jmax
+        dd(9)=qmax
+        dd(10)=relmax 
+        if (yaz.and.callfrom==40) write(200,*) "in sol/getdec couples end: jmax,qmax,relmax,surplus),vec(1:5),transfers"
+        if (yaz.and.callfrom==40) write(200,'(I4,I8,I4,8F9.2)') jmax,qmax,relmax,surplus,vec(1:5),transfers 
+        if (yaz.and.callfrom==50) write(200,*) "in sol/getdec mar mkt end: jmax,qmax,relmax,surplus),vec(1:5),transfers"
+        if (yaz.and.callfrom==50) write(200,'(I4,I8,I4,8F9.2)') jmax,qmax,relmax,surplus,vec(1:5),transfers 
+        if (yaz.and.callfrom==80) write(400,*) "in sim/getdec couples end: jmax,qmax,relmax,surplus),vec(1:5),transfers"
+        if (yaz.and.callfrom==80) write(400,'(I4,I8,I4,8F9.2)') jmax,qmax,relmax,surplus,vec(1:5),transfers  
+    end subroutine getdecR    
 
 
 
@@ -699,7 +1024,7 @@ end do
 			    else if ( w(g) == np1 ) then 
 				    !utils(g,x,q,trueindex)	= uhomet(g) * one(l(g)==truehome) + uloc(l(g))  + (alphaed(g,x2e(x))  + alphakid(g)) * one(x2kid(x)>1)  + nonlabinc(x2e(x)) + ubenefit_s(q)!+ ulocheat*heat(l(g))
                     utils(g,x,q,trueindex)	= uhomet(g) * one(l(g)==truehome) + uloc(l(g))  + alphakid(g) * one(x2kid(x)>1)  + nonlabinc(x2e(x)) + ubenefit_s(q)  + alphab(g) !+ ulocheat*heat(l(g))
-			    end if
+                end if
                 
                 !ahu october2022: 
                 !alphakid(g): kid(g)=1 is no kid, and kid(g)=2 and above is yes kid.   this alphakid used to have two dimensions for no reason. 
@@ -814,6 +1139,233 @@ end do
 
 	end subroutine get_util_w
     
+
+
+	subroutine get_util_wR
+        integer(i4b) :: q,x,w(2),l(2),kid(2),ed(2),expe(2),trueindex,trueco,truetyp,truehome,g,j,k
+        real(dp) :: epsw(2) !RHO(2,2),CD(2,2),
+        real(sp) :: wsgross,wcgross(2) !pwages(1:numbin),swages(1:numbin)
+        integer(i4b) :: bracket,bracketprev,bracketnext,sbrack,pbrack,z,loc,age
+        real(dp) :: statetaxtot,fedtaxtot,statetaxtotc(2),fedtaxtotc(2)
+    
+        utils=pen
+        utilc=pen
+        ws=pen
+        wc=pen   
+        
+        !if (mysay==1) then 
+        !    open(unit=68857,file='checktax1.txt')
+        !    open(unit=68858,file='checktax2.txt')
+        !end if 
+        do age=MNA,MXA
+        do g=MALES,FEMALES
+        do trueindex=1,ninp
+            do z=1,nz 
+                do x=1,nx
+                    utilmar(g,x,z,trueindex,age)= mg(trueindex)*one(xx2kid(1,x)==2)  + marshock(z) !+ umared*one(xx2e(1,x)==2) !+ umarkid*one(xx2kid(1,x)==2)  + umared*one(maxval(xx2e(:,x))==2)  !+ umaria * age
+                !    if (xx2kid(1,x).ne.xx2kid(2,x)) then ; print*, 'sth wrong with kids' ; stop ; end if
+                end do 
+            end do 
+        end do 
+        end do 
+        end do 
+    
+        ubenefit_s=0.0_dp
+        do q=1,nqs
+            if (q2w(q) <= np ) then
+                ubenefit_s(q) = 0.0_dp 
+            else if (q2w(q) == np1 ) then
+                ubenefit_s(q)= ubenefitbyloc(q2l(q))
+            else 
+                ubenefit_s(q)= 0.0_dp
+            end if 
+        end do 
+        ubenefit_c=0.0_dp
+        do q=1,nq
+            w(:)=qq2w(:,q) ; loc=qq2l(1,q)
+            if ( w(1) <= np .and. w(2)<=np  ) then
+                ubenefit_c(q) = 0.0_dp 
+            else if ( w(1) == np1 .and. w(2)<=np  ) then
+                ubenefit_c(q)= ubenefitbyloc(loc)
+            else if ( w(1) <= np .and. w(2) == np1  ) then
+                ubenefit_c(q)= ubenefitbyloc(loc) 
+            else if ( w(1) == np1 .and. w(2) == np1  ) then
+                ubenefit_c(q)= ubenefitbyloc(loc) + ubenefitbyloc(loc) 
+            else 
+                ubenefit_c(q)= 0.0_dp
+            end if 
+        end do 
+    
+        do trueindex=1,ninp    
+            do age=MNA,MXA
+            call index2cotyphome(trueindex,trueco,truetyp,truehome)
+            qs: do q=1,nqs 
+                xs: do x=1,nxs    
+                !call x2edexpkid(x,ed,exp,kid)    
+                do g=1,2
+                    movecost(x,q,trueindex,g)=fnmove( q2w(q),x2kid(x),x2e(x),trueindex,g) !0 to indicate singles 
+                    w(g) = q2w(q)						! wage 
+                    l(g) = q2l(q)						! location
+                    !pwages(1:numbin)=tax(1:numbin,numbin,l(g))%pwages
+                    if ( w(g) <= np ) then	
+                        epsw(g)=wg(w(g),x2e(x),g) !sig_wge(g)*wg(w(g),g) !FEB7 2023: BIG SIGLOC(1:NL) CHANGE TO WAGE PROCESS AND LATER SIGWGE CHANGED TO SIGWGE BY ED. NO MORE LOC. 
+                        ws(g,x,q,age,trueindex)	= fnwge(g,truetyp, l(g),epsw(g), x2e(x), x2r(x),age) 
+                        wsgross=ws(g,x,q,age,trueindex)
+                        bracket=locate(  pbracket(1:numbin)  ,  wsgross ) 
+                        if (bracket<1.or.bracket>numbin) then               
+                            print*, "There is something wrong with locate bracket",bracket
+                            print*, "pwages(1:numbin)",pbracket(1:numbin)
+                            print*, "wsgross         ",wsgross
+                            stop
+                        end if 
+                        !if (mysay==1) then 
+                            !if (bracket<numbin) then ; bracketnext=bracket+1 ; else ; bracketnext=numbin ; end if 
+                            !if (bracket>1) then ; bracketprev=bracket-1 ; else ; bracketprev=1 ; end if 
+                            !write(68857,'(tr3,"wsgross",tr1,"bracket",tr4,"prev",tr4,"here",tr4,"next")')
+                            !write(68857,'(f10.1,i4,3f10.1)') wsgross,bracket,pwages(bracketprev),pwages(bracket),pwages(bracketnext)
+                            !write(68857,*) 
+                            !write(68858,'(tr2,"truind",tr7,"q",tr7,"x",tr1,"sex",tr1,"typ",tr3,"l",tr2,"ed",tr1,"exp",tr3,"wsgross",tr5,"wsnet",tr2,"statetax",tr4,"fedtax")')
+                            !write(68858,'(3i8,5i4,4f10.2)') trueindex,q,x,g,truetyp,l(g),x2e(x),x2r(x),wsgross,wsnet(g,x,q,trueindex),staterate,fedrate
+                            !write(68858,*) 
+                        !end if 
+                    else if ( w(g) == np1 ) then 
+                        ws(g,x,q,age,trueindex)	 = 0.0_dp
+                        wsgross=ws(g,x,q,age,trueindex)
+                        !wsnet(g,x,q,trueindex)=0.0_dp
+                        bracket=1
+                    end if 
+                    
+                    call get_taxliability_s(l(g),bracket,wsgross,statetaxtot,fedtaxtot)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     wsnet(g,x,q,age,trueindex)=wsgross-(statetaxtot+fedtaxtot) 
+                    !if (mysay==0) write(*,'(3F12.1)') wsgross,statetaxtot,fedtaxtot
+    
+                    !if (taxset==0) then
+                    !    wsnet(g,x,q,trueindex)=wsgross !ws(g,x,q,trueindex)
+                    !end if 
+    
+                    
+                    if ( w(g) <= np ) then						
+                        utils(g,x,q,age,trueindex)	= uhomet(g) * one(l(g)==truehome) + uloc(l(g)) + lama(g)*ln( ws(g,x,q,age,trueindex) + nonlabinc(x2e(x)) ) + (1.0_dp-lama(g)) * ln(leishours(FULLTIMEWORK))  !+ nonlabinc(x2e(x)) !+ ulocheat*heat(l(g))
+                    else if ( w(g) == np1 ) then 
+                        !utils(g,x,q,trueindex)	= uhomet(g) * one(l(g)==truehome) + uloc(l(g))  + (alphaed(g,x2e(x))  + alphakid(g)) * one(x2kid(x)>1)  + nonlabinc(x2e(x)) + ubenefit_s(q)!+ ulocheat*heat(l(g))
+                        utils(g,x,q,age,trueindex)	= uhomet(g) * one(l(g)==truehome) + uloc(l(g))  + alphakid(g) * one(x2kid(x)>1)  + ubenefit_s(q)  + alphab(g) & !+ nonlabinc(x2e(x))  !+ ulocheat*heat(l(g))
+                        & + lama(g)*ln( nonlabinc(x2e(x)) ) + (1.0_dp-lama(g)) * ln(leishours(NOWORK)) 
+                    end if
+                    
+                    !ahu october2022: 
+                    !alphakid(g): kid(g)=1 is no kid, and kid(g)=2 and above is yes kid.   this alphakid used to have two dimensions for no reason. 
+                    !ahu later in january 2023: what is this kid(g) thing? and why is alphakid declared as alphakid(nkid) and yet it's really just alphakid(sex) i.e. alphakid(g)
+                    !it doesnt' affect anythign I suppose since in all the code it is always alphakid(g) even though it's declared as alphakid(nkid)
+                    !since nkid is 2 and number of sex is 2 as well, this doesn't really affect anythign but still it is not right. 
+                    !nkid is never above 2 though (i set it that way in data too for numkids above 2 is just always 2 in data). 
+                    !alphaed(g,ed(g)):   ed(g)=1 is noed and ed(g)=2 is yes ed (where  neduc is 2)    
+                end do !gender
+            end do xs
+        end do qs
+        end do !age
+        !close(68857)
+        !close(68858)
+    
+        do age=MNA,MXA
+        qc: do q=1,nq
+        xc: do x=1,nx
+            ed(:)=xx2e(:,x)    
+            expe(:)=xx2r(:,x)    
+            kid(:)=xx2kid(:,x)           
+            w(:) = qq2w(:,q)						! wage 
+            l(:) = qq2l(:,q)						! location
+            if (l(1).ne.l(2)) then ; print*, 'lm not equal to lf' ; stop ; end if 
+    
+            !******************************
+            !ahu summer18 050318 
+            !if (w(1)<=np) then 
+            !    ubc(1,q,x,trueindex)	= 0.0_dp           
+            !else if (w(1)==np1) then 
+            !    epsw(1)=0.0_dp
+            !    ubc(1,q,x,trueindex)	= replacement_rate*fnwge(1,truetyp, l(1),epsw(1), ed(1), expe(1) ) 
+            !end if 
+            !if (w(2)<=np) then 
+            !    ubc(2,q,x,trueindex)	= 0.0_dp           
+            !else if (w(2)==np1) then 
+            !    epsw(2)=0.0_dp
+            !    ubc(2,q,x,trueindex)	= replacement_rate*fnwge(2,truetyp, l(2),epsw(2), ed(2), expe(2) ) 
+            !end if 
+            !ahu summer18 050318 
+            !******************************
+    
+            !pwages(1:numbin)=tax(1:numbin,numbin,l(1))%pwages
+            !swages(1:numbin)=tax(numbin,1:numbin,l(2))%swages
+            if ( w(1) <= np .and. w(2) <= np ) then		
+                epsw(1)=wg(w(1),ed(1),1) !CD(1,1)*wg(w(1),1) !FEB7 2023: BIG SIGLOC(1:NL) CHANGE TO WAGE PROCESS
+                epsw(2)=wg(w(2),ed(2),2) !CD(2,1)*wg(w(1),1) + CD(2,2)*wg(w(2),2) !FEB7 2023: BIG SIGLOC(1:NL) CHANGE TO WAGE PROCESS
+                wc(1,x,q,age,trueindex)	= fnwge(1,truetyp, l(1),epsw(1), ed(1), expe(1) ,age ) 
+                wc(2,x,q,age,trueindex)	= fnwge(2,truetyp, l(2),epsw(2), ed(2), expe(2) ,age )  
+                wcgross(1:2)= wc(1:2,x,q,age,trueindex)
+                pbrack=locate(  pbracket(1:numbin)  ,  wcgross(1) ) 
+                sbrack=locate(  sbracket(1:numbin)  ,  wcgross(2) ) 
+            else if ( w(1) <= np .and. w(2) == np1 ) then		
+                epsw(1)=wg(w(1),ed(1),1) !sig_wge(1)*wg(w(1),1) !FEB7 2023: BIG SIGLOC(1:NL) CHANGE TO WAGE PROCESS
+                wc(1,x,q,age,trueindex)	= fnwge(1,truetyp, l(1),epsw(1), ed(1), expe(1) ,age) 
+                wc(2,x,q,age,trueindex)	= 0.0_dp
+                wcgross(1:2)= wc(1:2,x,q,age,trueindex)
+                pbrack=locate(  pbracket(1:numbin)  ,  wcgross(1) ) 
+                sbrack=1
+            else if ( w(1) == np1 .and. w(2) <= np ) then		
+                epsw(2)=wg(w(2),ed(2),2) !sig_wge(2)*wg(w(2),2) !FEB7 2023: BIG SIGLOC(1:NL) CHANGE TO WAGE PROCESS
+                wc(1,x,q,age,trueindex)	= 0.0_dp
+                wc(2,x,q,age,trueindex)	= fnwge(2,truetyp, l(2),epsw(2), ed(2), expe(2) ,age)   
+                wcgross(1:2)= wc(1:2,x,q,age,trueindex)
+                pbrack=1
+                sbrack=locate(  sbracket(1:numbin)  ,  wcgross(2) ) 
+            else if ( w(1) == np1 .and. w(2) == np1 ) then		
+                wc(1,x,q,age,trueindex)	= 0.0_dp
+                wc(2,x,q,age,trueindex)	= 0.0_dp           
+                wcgross(1:2)= 0.0_dp
+                pbrack=1
+                sbrack=1
+            end if 
+    
+        
+            call get_taxliability_c(l(1),pbrack,sbrack,wcgross(1:2),statetaxtotc,fedtaxtotc)
+            wcnet(1:2,x,q,age,trueindex)=wcgross(1:2)- ( sum(statetaxtotc(1:2)) + sum(fedtaxtotc(1:2)) ) 
+    
+            !if (taxset==0) then
+            !    wcnet(1:2,x,q,trueindex)	= wc(1:2,x,q,trueindex)
+            !end if 
+    
+                
+            do g=1,2
+                if ( w(g) <= np ) then						
+                    utilc(g,x,q,age,trueindex)	= uhomet(g) * one(l(g)==truehome)  + uloc(l(g)) + lama(g)*ln( wc(1,x,q,age,trueindex) + wc(2,x,q,age,trueindex) + nonlabinc(x2e(x)) ) + (1.0_dp-lama(g)) * ln(leishours(FULLTIMEWORK))  !+ ulocheat*heat(l(g))
+                else if ( w(g) == np1 ) then 
+                    !utilc(g,x,q,trueindex)	= uhomet(g) * one(l(g)==truehome)  + uloc(l(g)) + (alphaed(g,ed(g) ) + alphakid(g) ) * one(kid(g)>1)  !+ ulocheat*heat(l(g))
+                    utilc(g,x,q,age,trueindex)	= uhomet(g) * one(l(g)==truehome)  + uloc(l(g)) + alphakid(g) * one(kid(g)>1) + alphab(g) + lama(g)*ln( wc(1,x,q,age,trueindex) + wc(2,x,q,age,trueindex) + nonlabinc(x2e(x)) ) + (1.0_dp-lama(g)) * ln(leishours(NOWORK)) !+ ulocheat*heat(l(g))
+                    !ahu october2022: 
+                    !alphakid(g): kid(g)=1 is no kid, and kid(g)=2 and above is yes kid.   this alphakid used to have two dimensions for no reason. 
+                    !nkid is never above 2 though (i set it that way in data too for numkids above 2 is just always 2 in data). 
+                    !alphaed(g,ed(g)):   ed(g)=1 is noed and ed(g)=2 is yes ed (where  neduc is 2)
+                end if
+            end do   
+            
+        end do xc
+        end do qc
+        end do !age
+    
+        end do !trueindex
+    
+        !Male and female wage shocks for each period and from each location
+    !    do it=1,nt
+    !	    do iloc=1,nloc
+    !		    do rn=1,nn
+    !			    up1(it,rn,iloc)=CD(1,1)*rv1(it,rn,iloc)
+    !			    up2(it,rn,iloc)=CD(2,1)*rv1(it,rn,iloc)+CD(2,2)*rv2(it,rn,iloc)
+    !		    end do 
+    !	    end do
+    !    end do 
+    
+        end subroutine get_util_wR
+
+
 
     !subroutine get_taxliability_s(sex,lastbracketrate,gross,lastbracketprod)
     !    integer(i4b), intent(in) :: sex
@@ -982,6 +1534,171 @@ end do
         
 end module sol
 
+
+
+
+
+hold off
+ for i=1:9
+
+mu=[(i*(1/10))  (1-i*(1/10)) ] 
+mum(i)=mu(1)
+
+lambm=0.5;
+lambf=0.3;
+w=[5 5];
+T=15;
+hh=optimvar('hh',1,2);
+obj=-( (lambm*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambm)*log( T-hh(1) )   )^mu(1)) * ( (lambf*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambf)*log( T-hh(2) )   )^mu(2));
+prob = optimproblem('Objective',obj);
+show(prob);
+hh0.hh=[1 1];
+[sol,fval,exitflag,output,xsol] = solve(prob,hh0)
+hh=sol.hh
+vmaxm(i)= lambm*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambm)*log( T-hh(1) );   
+vmaxf(i)= lambf*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambf)*log( T-hh(2) );
+
+ end 
+
+
+
+ mum1=mum
+ vmaxm1=vmaxm
+ vmaxf1=vmaxf
+ plot(vmaxm,vmaxf,'--gs')
+ hold on
+
+ for i=1:9
+
+mu=[(i*(1/10))  (1-i*(1/10)) ] 
+
+lambm=0.5;
+lambf=0.3;
+w=[8 3];
+T=15;
+hh=optimvar('hh',1,2);
+obj=-( (lambm*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambm)*log( T-hh(1) )   )^mu(1)) * ( (lambf*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambf)*log( T-hh(2) )   )^mu(2));
+prob = optimproblem('Objective',obj);
+show(prob);
+hh0.hh=[1 1];
+[sol,fval,exitflag,output,xsol] = solve(prob,hh0)
+hh=sol.hh
+vmaxm(i)= lambm*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambm)*log( T-hh(1) )   
+vmaxf(i)= lambf*log(w(1)*hh(1)+w(2)*hh(2)) + (1-lambf)*log( T-hh(2) )
+
+ end 
+
+
+ mum1
+ vmaxm1
+ vmaxf1
+
+ mum
+ vmaxm
+ vmaxf
+ plot(vmaxm,vmaxf,'--gs')
+ hold on
+
+
+
+
+
+
+lambm=0.3;
+lambf=0.3;
+w=[10 5];
+T=15;
+hhm=optimvar('hhm');
+obj=- ( lambm*log(w(1)*hhm) + (1-lambm)*log( T-hhm ) );
+prob = optimproblem('Objective',obj);
+hh0.hhm=1;
+show(prob)
+[sol,fval,exitflag,output,xsol] = solve(prob,hh0)
+hhm=sol.hhm
+vmaxm_s=lambm*log(w(1)*hhm) + (1-lambm)*log( T-hhm )
+
+
+
+
+
+
+if (m(1)>=m(2) & m(2)>=m(3) )
+        if      ( f(1)>=f(2) & f(2)>=f(3) ) %1 ABS ABS  1
+            decx(i)=1                       %   BB AA SS       
+            decy(i)=1                       %   BB AA SS       
+        elseif ( f(1)>=f(3) & f(3)>=f(2))  %2  ABS ASB2      
+            decx(i)=1                       %   AA  BS S       
+            decy(i)=1                       %   AA  BB S       
+        elseif ( f(2)>=f(1) & f(1)>=f(3) ) %3  ABS BAS3      
+            decx(i)=1                       %   AA BB SS       
+            decy(i)=2                       %   AA BB SS                                        
+        end
+elseif ( m(1)>=m(3) & m(3)>=m(2) ) 
+        if      ( f(1)>=f(2) & f(2)>=f(3) ) %1 ASB ABS  1
+            decx(i)=1                       %   BB AA SS       
+            decy(i)=1                       %   BS AA SS       
+        elseif ( f(1)>=f(3) & f(3)>=f(2))  %2  ASB ASB2      
+            decx(i)=1                       %   AA  BS S       
+            decy(i)=1                       %   AA  BS S       
+        elseif ( f(2)>=f(1) & f(1)>=f(3) ) %3  ASB BAS3      
+            decx(i)=1                       %   AA BB SS       
+            decy(i)=1                       %   AA BS SS              
+        end
+elseif ( m(2)>=m(1) & m(1)>=m(3) ) 
+        if      ( f(1)>=f(2) & f(2)>=f(3) ) %1 BAS ABS  1
+            decx(i)=2                       %   BB AA SS       
+            decy(i)=1                       %   BB AA SS       
+        elseif ( f(1)>=f(3) & f(3)>=f(2))  %2  BAS ASB2      
+            decx(i)=1                       %   AA  BS S       
+            decy(i)=0                       %   AA  BB S       
+        elseif ( f(2)>=f(1) & f(1)>=f(3) ) %3  BAS BAS3      
+            decx(i)=2                       %   AA BB SS       rrrdtx
+            decy(i)=2                       %   AA BB SS     
+        end
+elseif ( m(3)>max(m(1),m(2)) | f(3)>max(f(1),f(2)) )      
+    decx(i)=0
+    decy(i)=0
+end
+            
+            decx(i)=0                       %   AS BS SS       
+            decy(i)=0                       %   SS                              
+        elseif ( f(3)>=f(2) & f(2)>=f(1) ) %5  ABS SBA5      
+            decx(i)=0                       %   AS BS SS       
+            decy(i)=0                       %   SS                              
+        elseif ( f(3)>=f(1) & f(1)>=f(2) ) %4  ASB SAB4      
+            decx(i)=0                       %   AS BS SS       
+            decy(i)=0                       %   SS AA BS                             
+        elseif ( f(3)>=f(2) & f(2)>=f(1) ) %5  ASB SBA5      
+            decx(i)=0                       %   AS BS SS       
+            decy(i)=0                       %   SS BS AA                                           
+
+        elseif ( f(3)>=f(1) & f(1)>=f(2) ) %4  BAS SAB4      
+            decx(i)=0                       %   AS BS SS       
+            decy(i)=0                       %   SS                              
+        elseif ( f(3)>=f(2) & f(2)>=f(1) ) %5  BAS SBA5      
+            decx(i)=0                       %   AS BS SS       
+            decy(i)=0                       %   SS                                            
+
+
+
+SAB ABS  1
+SS
+SS
+
+SAB ASB  2
+SS
+SS
+
+SAB BAS 3
+SS
+SS
+
+SAB SAB   4
+SS
+SS
+SAB SBA  5
+SS
+SS
 
 
 
